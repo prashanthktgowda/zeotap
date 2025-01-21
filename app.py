@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 # --- Initialize session state ---
 if "spreadsheet" not in st.session_state:
@@ -53,7 +54,6 @@ def apply_data_quality_function(df, operation, find_text=None, replace_text=None
         return df.replace(find_text, replace_text, regex=True)
     return df
 
-
 def apply_styles_to_dataframe(df, styles):
     """Apply font styles to a DataFrame using HTML rendering."""
     styled_df = df.style
@@ -77,9 +77,8 @@ def apply_styles_to_dataframe(df, styles):
                 )
     return styled_df
 
-
-
 # --- App Layout ---
+st.set_page_config(page_title="Google Sheets Mimic", layout="wide")
 st.title("Google Sheets Mimic - Streamlit")
 
 st.sidebar.header("Features")
@@ -165,7 +164,48 @@ if load_file:
         st.error(f"Error loading file: {e}")
 
 # --- Bonus Features ---
-st.write("### Bonus Features")
-if st.button("Create Chart (Sum by Columns)"):
-    chart_data = st.session_state.spreadsheet.apply(pd.to_numeric, errors="coerce").sum()
+st.write("### Chart Options")
+
+# User input for chart type
+chart_type = st.selectbox(
+    "Select Chart Type",
+    ["Bar Chart", "Line Chart", "Pie Chart", "Histogram", "Scatter Plot"]
+)
+
+# Column selection for charts
+selected_columns = st.multiselect(
+    "Select Columns for Chart",
+    st.session_state.spreadsheet.columns.tolist()
+)
+
+# Generate charts based on user input
+if chart_type == "Bar Chart" and selected_columns:
+    chart_data = st.session_state.spreadsheet[selected_columns].apply(pd.to_numeric, errors="coerce").sum()
     st.bar_chart(chart_data)
+
+elif chart_type == "Line Chart" and selected_columns:
+    chart_data = st.session_state.spreadsheet[selected_columns].apply(pd.to_numeric, errors="coerce")
+    st.line_chart(chart_data)
+
+elif chart_type == "Pie Chart" and selected_columns:
+    chart_data = st.session_state.spreadsheet[selected_columns].apply(pd.to_numeric, errors="coerce").sum()
+    fig, ax = plt.subplots()
+    ax.pie(chart_data, labels=chart_data.index, autopct='%1.1f%%', startangle=90)
+    ax.axis('equal')
+    st.pyplot(fig)
+
+elif chart_type == "Histogram" and selected_columns:
+    chart_data = st.session_state.spreadsheet[selected_columns].apply(pd.to_numeric, errors="coerce").stack()
+    fig, ax = plt.subplots()
+    ax.hist(chart_data, bins=10)
+    st.pyplot(fig)
+
+elif chart_type == "Scatter Plot" and len(selected_columns) >= 2:
+    chart_data = st.session_state.spreadsheet[selected_columns].apply(pd.to_numeric, errors="coerce")
+    fig, ax = plt.subplots()
+    ax.scatter(chart_data.iloc[:, 0], chart_data.iloc[:, 1])
+    ax.set_xlabel(selected_columns[0])
+    ax.set_ylabel(selected_columns[1])
+    st.pyplot(fig)
+else:
+    st.warning("Please select at least two columns for Scatter Plot or valid columns for other charts.")
