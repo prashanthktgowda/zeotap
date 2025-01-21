@@ -2,136 +2,170 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-def initialize_session():
-    if 'data' not in st.session_state:
-        st.session_state.data = pd.DataFrame(np.nan, index=range(10), columns=[chr(65 + i) for i in range(10)])
-    if 'selection' not in st.session_state:
-        st.session_state.selection = None
+# --- Initialize session state ---
+if "spreadsheet" not in st.session_state:
+    # Default 5x5 empty DataFrame
+    st.session_state.spreadsheet = pd.DataFrame(
+        [["" for _ in range(5)] for _ in range(5)], columns=list("ABCDE")
+    )
+if "styles" not in st.session_state:
+    # A dictionary to store font styles for specific cell ranges
+    st.session_state.styles = {}
 
-def display_spreadsheet():
-    st.markdown("""
-        <style>
-            .stApp {
-                font-family: Arial, sans-serif;
-            }
-            .googlesheet-clone {
-                border: 1px solid #ddd;
-                border-collapse: collapse;
-                width: 100%;
-            }
-            .googlesheet-clone th, .googlesheet-clone td {
-                border: 1px solid #ddd;
-                padding: 8px;
-                text-align: center;
-            }
-            .googlesheet-clone th {
-                background-color: #f2f2f2;
-                font-weight: bold;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
-    st.write("### Google Sheets Clone")
-    edited_df = st.data_editor(st.session_state.data, use_container_width=True, num_rows='dynamic', height=400)
-    st.session_state.data = edited_df
-
-def validate_data():
-    for col in st.session_state.data.columns:
-        st.session_state.data[col] = st.session_state.data[col].astype(str)
-
-def apply_function(function_name):
+# --- Helper Functions ---
+def perform_operation(data, operation, range_start, range_end):
     try:
-        selected_range = st.text_input("Enter cell range (e.g., A1:A5):")
-        if selected_range:
-            col, rows = selected_range[0], selected_range[1:].split(':')
-            start_row, end_row = map(lambda x: int(x) - 1, rows)
-            col_index = ord(col.upper()) - 65
-            
-            data_range = st.session_state.data.iloc[start_row:end_row+1, col_index]
-            
-            if function_name == 'SUM':
-                result = data_range.sum()
-            elif function_name == 'AVERAGE':
-                result = data_range.mean()
-            elif function_name == 'MAX':
-                result = data_range.max()
-            elif function_name == 'MIN':
-                result = data_range.min()
-            elif function_name == 'COUNT':
-                result = data_range.count()
-            elif function_name == 'TRIM':
-                result = data_range.str.strip()
-            elif function_name == 'UPPER':
-                result = data_range.str.upper()
-            elif function_name == 'LOWER':
-                result = data_range.str.lower()
-            
-            st.success(f"Result: {result}")
+        # Map column letters to DataFrame column indices
+        col_map = {chr(65 + i): i for i in range(len(data.columns))}  # A -> 0, B -> 1, etc.
+        start_row, start_col = int(range_start[1:]) - 1, col_map[range_start[0]]
+        end_row, end_col = int(range_end[1:]) - 1, col_map[range_end[0]]
+
+        # Extract the range of data
+        subrange = data.iloc[start_row:end_row + 1, start_col:end_col + 1]
+        subrange_numeric = subrange.apply(pd.to_numeric, errors="coerce")  # Convert to numeric
+
+        # Perform the specified operation
+        if operation == "SUM":
+            return subrange_numeric.sum().sum()
+        elif operation == "AVERAGE":
+            return subrange_numeric.mean().mean()
+        elif operation == "MAX":
+            return subrange_numeric.max().max()
+        elif operation == "MIN":
+            return subrange_numeric.min().min()
+        elif operation == "COUNT":
+            return subrange_numeric.count().sum()
+        else:
+            return "Invalid operation"
     except Exception as e:
-        st.error(f"Error: {e}")
+        return f"Error: {e}"
 
-def find_and_replace():
-    find_text = st.text_input("Find:")
-    replace_text = st.text_input("Replace with:")
-    if st.button("Replace"):
-        st.session_state.data.replace(find_text, replace_text, inplace=True)
-        st.success("Replacement done!")
+def apply_data_quality_function(df, operation, find_text=None, replace_text=None):
+    if operation == "TRIM":
+        return df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    elif operation == "UPPER":
+        return df.applymap(lambda x: x.upper() if isinstance(x, str) else x)
+    elif operation == "LOWER":
+        return df.applymap(lambda x: x.lower() if isinstance(x, str) else x)
+    elif operation == "REMOVE_DUPLICATES":
+        return df.drop_duplicates()
+    elif operation == "FIND_AND_REPLACE" and find_text and replace_text:
+        return df.replace(find_text, replace_text, regex=True)
+    return df
 
-def remove_duplicates():
-    st.session_state.data.drop_duplicates(inplace=True)
-    st.success("Duplicates removed!")
 
-def data_entry_validation():
-    st.write("### Data Entry and Validation")
-    validate_data()
-    st.success("Validation completed: All values converted to string.")
+def apply_styles_to_dataframe(df, styles):
+    """Apply font styles to a DataFrame using HTML rendering."""
+    styled_df = df.style
 
-def format_cells():
-    selected_format = st.selectbox("Select formatting", ["Bold", "Italics", "Font Size", "Color"])
-    st.success("Formatting applied!")
+    for (range_start, range_end), style in styles.items():
+        # Map range
+        col_map = {chr(65 + i): i for i in range(len(df.columns))}  # A -> 0, B -> 1, etc.
+        start_row, start_col = int(range_start[1:]) - 1, col_map[range_start[0]]
+        end_row, end_col = int(range_end[1:]) - 1, col_map[range_end[0]]
 
-def row_column_operations():
-    operation = st.selectbox("Select operation", ["Add Row", "Delete Row", "Add Column", "Delete Column"])
-    if operation == "Add Row":
-        st.session_state.data = pd.concat([st.session_state.data, pd.DataFrame([[np.nan]*len(st.session_state.data.columns)], columns=st.session_state.data.columns)], ignore_index=True)
-    elif operation == "Delete Row":
-        row_idx = st.number_input("Enter row index to delete:", min_value=0, max_value=len(st.session_state.data)-1)
-        st.session_state.data.drop(index=row_idx, inplace=True)
-        st.session_state.data.reset_index(drop=True, inplace=True)
-    elif operation == "Add Column":
-        new_col = st.text_input("Enter new column name:")
-        st.session_state.data[new_col] = np.nan
-    elif operation == "Delete Column":
-        col_name = st.selectbox("Select column to delete", st.session_state.data.columns)
-        st.session_state.data.drop(columns=[col_name], inplace=True)
-    st.success("Operation completed!")
+        # Iterate through the specified range and apply styles
+        for row in range(start_row, end_row + 1):
+            for col in range(start_col, end_col + 1):
+                styled_df = styled_df.applymap(
+                    lambda _: (
+                        f"color: {style['font_color']}; "
+                        f"font-size: {style['font_size']}px; "
+                        f"font-weight: {style['font_style']};"
+                    ),
+                    subset=(df.index[row], df.columns[col]),
+                )
+    return styled_df
 
-def main():
-    st.title("Google Sheets Clone with Streamlit")
-    initialize_session()
-    display_spreadsheet()
-    data_entry_validation()
-    
-    st.sidebar.title("Functions")
-    function_choice = st.sidebar.selectbox("Select a function", ["SUM", "AVERAGE", "MAX", "MIN", "COUNT", "TRIM", "UPPER", "LOWER"])
-    apply_function(function_choice)
-    
-    st.sidebar.title("Data Operations")
-    if st.sidebar.button("Remove Duplicates"):
-        remove_duplicates()
-    
-    st.sidebar.title("Find and Replace")
-    find_and_replace()
-    
-    st.sidebar.title("Cell Formatting")
-    format_cells()
-    
-    st.sidebar.title("Row/Column Operations")
-    row_column_operations()
-    
-    if st.button("Download CSV"):
-        csv = st.session_state.data.to_csv(index=False).encode('utf-8')
-        st.download_button("Download", data=csv, file_name="spreadsheet.csv", mime="text/csv")
 
-if __name__ == "__main__":
-    main()
+
+# --- App Layout ---
+st.title("Google Sheets Mimic - Streamlit")
+
+st.sidebar.header("Features")
+save_file = st.sidebar.button("Save File")
+load_file = st.sidebar.file_uploader("Load Spreadsheet", type=["xlsx"])
+data_quality = st.sidebar.selectbox(
+    "Data Quality Functions", ["None", "TRIM", "UPPER", "LOWER", "REMOVE_DUPLICATES", "FIND_AND_REPLACE"]
+)
+
+# Editable spreadsheet
+st.write("### Editable Spreadsheet")
+edited_spreadsheet = st.data_editor(
+    st.session_state.spreadsheet, num_rows="dynamic", use_container_width=True
+)
+st.session_state.spreadsheet = edited_spreadsheet
+
+# --- Data Quality Functions ---
+if data_quality != "None":
+    if data_quality == "FIND_AND_REPLACE":
+        find_text = st.text_input("Find Text")
+        replace_text = st.text_input("Replace Text")
+        if st.button("Apply Find and Replace"):
+            st.session_state.spreadsheet = apply_data_quality_function(
+                st.session_state.spreadsheet, data_quality, find_text, replace_text
+            )
+    else:
+        st.session_state.spreadsheet = apply_data_quality_function(
+            st.session_state.spreadsheet, data_quality
+        )
+
+# --- Mathematical Functions ---
+st.write("### Mathematical Functions")
+
+# Dropdown for selecting operation
+operation = st.selectbox(
+    "Select Operation",
+    ["SUM", "AVERAGE", "MAX", "MIN", "COUNT"]
+)
+
+# Input range for operation
+range_start = st.text_input("Enter Start Cell (e.g., A1)", value="A1")
+range_end = st.text_input("Enter End Cell (e.g., B3)", value="B3")
+
+# Automatically calculate result when data changes
+if operation and range_start and range_end:
+    result = perform_operation(st.session_state.spreadsheet, operation, range_start, range_end)
+    st.success(f"Result of {operation} from {range_start} to {range_end}: {result}")
+
+# --- Font Style Features ---
+st.write("### Font Styling Options")
+
+# Font size, color, and style inputs
+font_size = st.number_input("Font Size (in px)", min_value=8, max_value=36, value=12, step=1)
+font_color = st.color_picker("Font Color", value="#000000")
+font_style = st.selectbox("Font Style", ["normal", "bold", "italic"])
+
+# Apply styles to a range
+if st.button("Apply Font Style"):
+    st.session_state.styles[(range_start, range_end)] = {
+        "font_size": font_size,
+        "font_color": font_color,
+        "font_style": font_style,
+    }
+    st.success(f"Font style applied to range {range_start}:{range_end}")
+
+# Render styled DataFrame
+st.write("### Styled Spreadsheet (Preview)")
+styled_df = apply_styles_to_dataframe(st.session_state.spreadsheet, st.session_state.styles)
+st.write(styled_df.to_html(escape=False), unsafe_allow_html=True)
+
+# --- Save and Load ---
+if save_file:
+    # Save to Excel
+    file_name = st.text_input("Enter file name", value="spreadsheet.xlsx")
+    st.session_state.spreadsheet.to_excel(file_name, index=False)
+    st.success(f"Spreadsheet saved successfully as {file_name}!")
+
+if load_file:
+    try:
+        st.session_state.spreadsheet = pd.read_excel(load_file)
+        st.success("Spreadsheet loaded successfully!")
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
+
+# --- Bonus Features ---
+st.write("### Bonus Features")
+if st.button("Create Chart (Sum by Columns)"):
+    chart_data = st.session_state.spreadsheet.apply(pd.to_numeric, errors="coerce").sum()
+    st.bar_chart(chart_data)
